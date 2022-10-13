@@ -1,0 +1,59 @@
+WITH only_yrmo AS (
+  SELECT DISTINCT
+    yr_mo
+  FROM toast.analytics_core.date_dim
+  WHERE yr_mo BETWEEN '2012-01' AND '2022-07'
+)
+, customer_month AS (
+  SELECT
+    customer_id
+    , TO_VARCHAR(pos_first_order_date, 'yyyy-MM') AS pfom
+    , TO_VARCHAR(COALESCE(churn_date,'2099-12-31'), 'yyyy-MM') AS churn
+    , yr_mo
+    FROM toast.analytics_core.customer
+    FULL OUTER JOIN only_yrmo
+  ORDER BY customer_id
+  )
+, vendor_month AS (
+  SELECT DISTINCT
+    yr_mo
+    , b.customer_id
+    , LAST_VALUE(d.dt) OVER (PARTITION BY customer_id,d.yr_mo ORDER BY d.dt ASC) AS vendor_start
+    , LAST_VALUE(vendor) OVER (PARTITION BY customer_id,d.yr_mo ORDER BY d.dt ASC) AS vendor
+  FROM  toast.source_product.payment_processing_config_staging ppc
+  INNER JOIN toast.analytics_core.toastorders_customer_bridge b ON b.toastorders_restaurant_id = ppc.toastorders_restaurant_id
+  INNER JOIN toast.analytics_core.date_dim d ON d.date_id = ppc.start_yyyymmdd
+)
+, gpv_month AS (
+  SELECT
+    p.customer_id
+    , yr_mo
+    , COALESCE(gmv,0) AS gmv_adj
+  FROM toast.payments.monthly_customer_payments p
+)
+, all_data AS (
+  SELECT DISTINCT
+    c.yr_mo
+    , c.customer_id
+    , c.pfom
+    , c.churn
+    , g.gmv_adj
+    , COALESCE(vendor, LAG(vendor)  IGNORE NULLS OVER (PARTITION BY c.customer_id ORDER BY c.yr_mo),
+              LEAD(vendor)  IGNORE NULLS OVER (PARTITION BY c.customer_id ORDER BY c.yr_mo)) month_vendor
+  FROM customer_month c
+  LEFT JOIN vendor_month v ON v.yr_mo = c.yr_mo AND v.customer_id = c.customer_id
+  LEFT JOIN gpv_month g ON g.yr_mo = c.yr_mo AND g.customer_id = c.customer_id
+ )
+ , all_data_trimmed AS (SELECT * FROM all_data WHERE yr_mo >= pfom AND yr_mo <= churn)
+ SELECT
+    yr_mo
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'TANDEM' THEN customer_id ELSE NULL END) AS worldpay
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'CHASE_TANDEM' THEN customer_id ELSE NULL END) AS chase
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'TANDEM' AND gmv_adj > 0 THEN customer_id ELSE NULL END) AS worldpay_active
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'CHASE_TANDEM' AND gmv_adj > 0 THEN customer_id ELSE NULL END) AS chase_active
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'TANDEM' AND churn = yr_mo THEN customer_id ELSE NULL END) AS worldpay_churn
+    , COUNT(DISTINCT CASE WHEN month_vendor = 'CHASE_TANDEM' AND churn = yr_mo THEN customer_id ELSE NULL END) AS chase_churn
+    FROM all_data_trimmed
+    GROUP BY 1
+    ORDER BY 1
+ ;
