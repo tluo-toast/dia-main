@@ -1,0 +1,90 @@
+With Skeleton as (
+select 
+    d.dt,
+    h.hour_of_day_id
+from analytics_core.date_dim d, analytics_core.hour_of_day_dim h
+where d.dt between '2022-09-01' and current_date()
+)
+
+
+, Staging as (
+select
+    timestamp_from_parts(year(dt),month(dt),day(dt),hour_of_day_id,0,0) as Timestamp,
+    f.five9_agent_email,
+    five9_timestamp,
+    five9_state,
+    five9_agent_state_time_in_seconds,
+    date_trunc(hour,five9_timestamp) as start_hour,
+    date_trunc(hour,dateadd(seconds,five9_agent_state_time_in_seconds, five9_timestamp)) as end_hour,
+    datediff(hour,start_hour, end_hour)+1 as max_hour,
+    dateadd(hour,1, timestamp) as next_hour,
+    datediff(second,iff(hour(five9_timestamp) = hour(timestamp),five9_timestamp,timestamp),next_hour) as time_to_next_hour,
+    case when start_hour = timestamp and time_to_next_hour - five9_agent_state_time_in_seconds >= 0 then five9_agent_state_time_in_seconds
+         when start_hour = timestamp then time_to_next_hour
+         when end_hour <> timestamp then 3600
+         when end_hour = timestamp then five9_agent_state_time_in_seconds - datediff(second,five9_timestamp,dateadd(hour,1, date_trunc(hour,five9_timestamp))) - iff(max_hour > 1,(3600*(max_hour-2)),0)
+         end as time_in_hour
+from skeleton s
+left join source_five9.five9_agentstatedetails_current f on 
+    timestamp_from_parts(year(dt),month(dt),day(dt),hour_of_day_id,0,0) between date_trunc(hour,five9_timestamp) and  date_trunc(hour,dateadd(seconds,five9_agent_state_time_in_seconds, five9_timestamp))
+)
+
+-- select 
+-- Timestamp,
+-- sum(iff(FIVE9_STATE = 'Ready',time_in_hour,0)) as ReadyTime,
+-- sum(iff(FIVE9_STATE in ('On Call','After Call Work','On Hold'),time_in_hour,0)) as HandleTime,
+-- div0(HandleTime,(HandleTime + ReadyTime)) as Occupancy
+-- from Staging
+-- group by 1
+-- order by 1;
+
+select
+    Timestamp,
+       (CASE
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Campaign A' THEN 'POS Kitchen'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Kitchen Ops' THEN 'POS Kitchen'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Kitchen' THEN 'POS Kitchen'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Campaign B' THEN 'POS Hardware'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Campaign Hardware' THEN 'POS Hardware'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Hardware' THEN 'POS Hardware'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Hardware' THEN 'POS Hardware'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Campaign C' THEN 'POS Chat'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Chat' THEN 'POS Chat'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Chat' THEN 'POS Chat'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Campaign D' THEN 'POS Networking'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Networking' THEN 'POS Networking'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Networking & NOC' THEN 'POS Networking'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Networking' THEN 'POS Networking'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Network Care' then 'POS Networking'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Money' THEN 'POS Money'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Payments' THEN 'POS Money'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Payments' THEN 'POS Money'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Integrations' THEN 'POS Integrations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'API Integrations' then 'POS Integrations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS Integrations' then 'POS Integrations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Customer Care Escalations' THEN 'POS Escalations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Escalations' THEN 'POS Escalations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Technical Escalations' THEN 'POS Escalations'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Enterprise Support' THEN 'POS Enterprise Support'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Order Operations' THEN 'POS Order Ops'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'Subscription Services' THEN 'POS Subscription Services'
+          WHEN (IFF(employee."SUPERVISORY_ORG" = 'Inside Sales Managers', 'Inside', employee."SUPERVISORY_ORG")) = 'POS A Kitchen' THEN 'POS Kitchen'
+          ELSE 'Non POS Campaign'
+          END) AS "employee.customer_care_campaign",
+    CASE WHEN (employee."TEAM") = 'Sutherland' THEN 'Sutherland'
+               WHEN (employee."TEAM") = 'Ibex' THEN 'Ibex'
+               WHEN (employee."TEAM") IS NOT NULL THEN 'Internal'
+               ELSE 'Other'
+               END  AS "employee.customer_care_site",
+    CASE WHEN (employee."HIGH_LEVEL_ROLE") ilike '%Senior Tier 1%' then 'Senior Specialist'
+      WHEN (employee."HIGH_LEVEL_ROLE") ilike '%Senior Tier 2%' THEN 'Senior Expert'
+     WHEN (employee."HIGH_LEVEL_ROLE") ilike '%tier 1%' then 'Specialist'
+     WHEN (employee."HIGH_LEVEL_ROLE") ilike '%tier 2%' then 'Expert'
+     when (employee."HIGH_LEVEL_ROLE") ilike '%SME%' then 'SME'
+     else 'Other'
+     END  AS "employee.customer_care_role",
+    sum(iff(FIVE9_STATE = 'Ready',time_in_hour,0)) as ReadyTime,
+    sum(iff(FIVE9_STATE in ('On Call','After Call Work','On Hold'),time_in_hour,0)) as HandleTime
+from Staging s
+left join analytics_core.employee_daily_dim employee on lower(five9_agent_email) = employee.email and to_date(timestamp) = employee.employee_date
+group by 1,2,3,4;

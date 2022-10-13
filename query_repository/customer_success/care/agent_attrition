@@ -1,0 +1,97 @@
+With Base as (
+select
+    case when high_level_role ilike '%Senior Tier 1%' then 'Senior Specialist'
+         when high_level_role ilike '%Senior Tier 2%' THEN 'Senior Expert'
+         when high_level_role ilike '%tier 1%' then 'Specialist'
+         when high_level_role ilike '%tier 2%' then 'Expert'
+         when high_level_role ilike '%SME%' then 'SME'
+         else 'Other' end as Role,
+    CASE
+          WHEN supervisory_org = 'Campaign A' THEN 'POS Kitchen'
+          WHEN supervisory_org = 'Kitchen Ops' THEN 'POS Kitchen'
+          WHEN supervisory_org = 'POS Kitchen' THEN 'POS Kitchen'
+          WHEN supervisory_org = 'Campaign B' THEN 'POS Hardware'
+          WHEN supervisory_org = 'Campaign Hardware' THEN 'POS Hardware'
+          WHEN supervisory_org = 'Hardware' THEN 'POS Hardware'
+          WHEN supervisory_org = 'POS Hardware' THEN 'POS Hardware'
+          WHEN supervisory_org = 'Campaign C' THEN 'POS Chat'
+          WHEN supervisory_org = 'Chat' THEN 'POS Chat'
+          WHEN supervisory_org = 'POS Chat' THEN 'POS Chat'
+          WHEN supervisory_org = 'Campaign D' THEN 'POS Networking'
+          WHEN supervisory_org = 'Networking' THEN 'POS Networking'
+          WHEN supervisory_org = 'Networking & NOC' THEN 'POS Networking'
+          WHEN supervisory_org = 'POS Networking' THEN 'POS Networking'
+          WHEN supervisory_org = 'Network Care' then 'POS Networking'
+          WHEN supervisory_org = 'Money' THEN 'POS Money'
+          WHEN supervisory_org = 'POS Payments' THEN 'POS Money'
+          WHEN supervisory_org = 'Payments' THEN 'POS Money'
+          WHEN supervisory_org = 'Integrations' THEN 'POS Integrations'
+          WHEN supervisory_org = 'API Integrations' and team = 'Ibex' then 'POS Integrations'
+          WHEN supervisory_org = 'POS Integrations' and team = 'Ibex'  then 'POS Integrations'
+          WHEN supervisory_org = 'Enterprise Support' THEN 'POS Enterprise Support'
+          WHEN supervisory_org = 'POS A Kitchen' THEN 'POS Kitchen'
+          WHEN supervisory_org = 'Customer Success, Guest Experience' THEN 'Guest Experience'
+          WHEN supervisory_org ilike '%Dublin%' then 'Dublin'
+          ELSE 'Other'
+          END as Campaign,
+    employee_date,
+    employee_row_id,
+    employee_id,
+    email,
+    role_end_date,
+    role_start_date,
+    team,
+    employment_end_date,
+    supervisory_org,
+    iff(team in ('Sutherland','Ibex'),team,'Internal') as Site,
+    high_level_role,
+    employment_start_date,
+    office_location
+from analytics_core.employee_daily_dim
+where supervisory_org not in ('Employee Cloud','xtraCHEF')
+)
+
+, ModelFlag as (
+select
+    iff(Role <> 'Other' and Campaign <> 'Other'
+        ,true,false) as in_finance_headcount,
+    employee_date,
+    email,
+    role_end_date,
+    role_start_date,
+    employment_end_date,
+    employment_start_date,
+    high_level_role,
+    Site,
+    supervisory_org,
+    lead(in_finance_headcount) over(partition by email order by employee_date) as next_in_finance_headcount,
+    office_location
+from Base
+where employee_date >= role_start_date and (employee_date <= employment_end_date or employment_end_date is null)
+)
+
+, DailyHC as (
+select
+iff(Site='Internal','Internal','BPO') as SiteGrouped,
+employee_date,
+count(distinct iff(in_finance_headcount = true,email,null)) as DailyEmployedHeadcount,
+count(distinct iff(in_finance_headcount = true and (next_in_finance_headcount = false or next_in_finance_headcount is null) and email is not null,email,null)) as Leavers,    
+count(distinct iff(in_finance_headcount = true and (next_in_finance_headcount = false or next_in_finance_headcount is null) and email is not null and employment_end_date = employee_date,email,null )) as Leavers_Company,    
+count(distinct iff(in_finance_headcount = true and (next_in_finance_headcount = false or next_in_finance_headcount is null) and email is not null and (employment_end_date is null or employment_end_date > employee_date),email,null )) as Leavers_FinanceHC,
+count(distinct iff(in_finance_headcount = true and (next_in_finance_headcount = false or next_in_finance_headcount is null) and email is not null and employment_end_date = '2022-09-30' and office_location = 'San Antonio',email,null)) as Leavers_SATX
+from ModelFlag
+where employee_date between '2022-01-01' and '2022-09-30'
+group by 1,2
+)
+
+select
+date_trunc(month,employee_date) as Month,
+SiteGrouped,
+sum(Leavers) as Leavers_Total,
+sum(Leavers_Company) as Leavers_Company,
+sum(Leavers_FinanceHC) as Leavers_FinanceHC,
+round(avg(DailyEmployedHeadcount),0) as AvgDailyEmployedHeadcount,
+div0(Leavers_Total,AvgDailyEmployedHeadcount) as Attrition,
+sum(Leavers_SATX) as Leavers_SATX
+from DailyHC
+group by 1,2;

@@ -1,0 +1,136 @@
+create or replace table  toast_joanna_karavolias_dev.care_tables.cohort_growth as (
+WITH grandparents AS (
+            SELECT
+              d.dt,
+              grandparent_dim.salesforce_accountid,
+              grandparent_dim.customer_id,
+              grandparent_dim.current_rsm_id,
+              grandparent_dim.parent_market_segment,
+              count(DISTINCT
+                      CASE WHEN a.pos_status = 'Live' THEN a.salesforce_accountid
+                        ELSE NULL
+                      END) AS location_count,
+              SUM(a.pos_live_saas_amount) * 12 AS live_saas_arr,
+               SUM(CASE WHEN dc.dt = customer_dim.pos_first_order_date then dc.pos_live_saas_amount end)*12 as new_live_saas
+            FROM analytics_core.date_dim d
+            INNER JOIN payments.daily_customer_details a
+            ON a.dt = d.dt
+            LEFT JOIN snapshots.customer_monthly AS customer_dim
+            ON a.salesforce_accountid = customer_dim.salesforce_accountid
+              AND d.firstdayofmonth = customer_dim.month
+            LEFT JOIN analytics_core.account ac
+            ON customer_dim.salesforce_accountid = ac.salesforce_accountid
+            LEFT JOIN snapshots.customer_monthly AS parent_dim
+            ON customer_dim.salesforce_parent_accountid = parent_dim.salesforce_accountid
+              AND customer_dim.month = parent_dim.month
+            LEFT JOIN snapshots.customer_monthly AS grandparent_dim
+            ON parent_dim.salesforce_parent_accountid = grandparent_dim.salesforce_accountid
+              AND parent_dim.month = grandparent_dim.month
+            LEFT JOIN payments.daily_customer_details dc
+                ON customer_dim.salesforce_accountid = dc.salesforce_accountid
+                AND dc.dt = d.dt
+            WHERE
+                (ac.reseller_account_name_stamp NOT in ('Postec','Retail Control Systems','Quality Retail Systems','Cloudpoint Hospitality','DCRS, Inc.') OR ac.reseller_account_name_stamp IS NULL)
+                AND grandparent_dim.salesforce_accountid != '001C000001dKHZ8IAO'
+  --  and grandparent_dim.salesforce_accountid = '0014W00002NuNfBQAV'
+   -- and d.dt >= '2021-01-01'
+   -- and grandparent_dim.parent_market_segment ilike 'smb'
+   -- and grandparent_dim.salesforce_accountid = '0013c00001nVetGAAS'
+            GROUP BY d.dt, grandparent_dim.salesforce_accountid, grandparent_dim.customer_id, grandparent_dim.current_rsm_id, grandparent_dim.parent_market_segment 
+
+    )
+ 
+ 
+-- , new_location_saas as (
+-- select
+--     ca.dt,
+--     ca.salesforce_accountid,
+--     ca.pos_first_order_date,
+--     sum(pc.pos_live_saas_amount)*12 as new_location_saas_arr,
+--       SUM(CASE WHEN o.opportunity_type = 'Existing Business (Upsell)' AND (o.opportunity_software_mrr+o.opportunity_hardware_cost+o.opportunity_software_mrr) >= 0 AND o.opportunity_close_date = ca.dt THEN o.opportunity_software_mrr
+--                     ELSE 0
+--                   END)*12 AS upsell_saas_arr,
+--   -- should this be existing buisness (downsell)
+--    SUM(CASE WHEN o.opportunity_type = 'Existing Business (Upsell)' AND (o.opportunity_software_mrr+o.opportunity_hardware_cost+o.opportunity_software_mrr) < 0 AND o.opportunity_close_date = ca.dt THEN o.opportunity_software_mrr
+--                     ELSE 0
+--                   END)*12 AS downsell_saas_arr 
+-- from grandparents ca
+-- left join analytics_core.customer c 
+--     on ca.salesforce_accountid = c.salesforce_parent_accountid
+-- left join payments.daily_customer_details pc
+--     on c.salesforce_accountid = pc.salesforce_accountid
+--     and pc.dt = ca.dt
+-- left join gtm.opportunity o
+--     on o.salesforce_accountid = c.salesforce_accountid
+--     and o.opportunity_iswon
+--                   AND o.salesforce_opportunityownerid != '0053c00000Bggz6AAB'
+--                   AND (o.opportunity_type = 'Existing Business (Upsell)' OR (o.opportunity_record_type = 'Payroll' AND o.new_or_existing_toast_customer = 'Existing Toast Customer'))
+-- group by 1,2,3
+
+--     )
+
+, upsell_downsell as ( 
+select
+    nls.dt,
+    nls.salesforce_accountid,
+  SUM(CASE WHEN o.opportunity_type = 'Existing Business (Upsell)' AND (o.opportunity_software_mrr+o.opportunity_hardware_cost+o.opportunity_software_mrr) >= 0 AND o.opportunity_close_date = nls.dt THEN o.opportunity_software_mrr
+                    ELSE 0
+                  END)*12 AS upsell_saas_arr,
+  -- should this be existing buisness (downsell)
+   SUM(CASE WHEN o.opportunity_type = 'Existing Business (Upsell)' AND (o.opportunity_software_mrr+o.opportunity_hardware_cost+o.opportunity_software_mrr) < 0 AND o.opportunity_close_date = nls.dt THEN o.opportunity_software_mrr
+                    ELSE 0
+                  END)*12 AS downsell_saas_arr 
+from grandparents nls
+left join analytics_core.customer c
+    on nls.salesforce_accountid = c.salesforce_parent_accountid
+left join gtm.opportunity o
+    on o.salesforce_accountid = c.salesforce_accountid
+            WHERE o.opportunity_iswon
+                  AND o.salesforce_opportunityownerid != '0053c00000Bggz6AAB'
+                  AND (o.opportunity_type = 'Existing Business (Upsell)' OR (o.opportunity_record_type = 'Payroll' AND o.new_or_existing_toast_customer = 'Existing Toast Customer'))
+group by 1,2
+
+    )
+ , churned_saas as (   
+ select 
+    ca.dt,
+    ca.salesforce_accountid,
+    case when c.churn_reason ilike 'competitor' then 'preventable' else 'non-preventable' end as churn_reason,
+    sum(case when ds.nbo_churn_date = ds.dt and ds.pos_first_order_date is not null then ds.saas_price end)*12 as churned_saas_arr
+ from grandparents ca
+ left join analytics_core.customer c
+    on ca.salesforce_accountid = c.salesforce_parent_accountid
+left join analytics_core_arr.saas_daily_status ds
+    on ds.salesforce_accountid = c.salesforce_accountid
+    and ca.dt = ds.dt
+group by 1,2,3
+
+     )
+     
+ select
+    gp.*,
+    -- nls. new_location_saas_arr,
+    -- nls.upsell_saas_arr,
+    -- nls.downsell_saas_arr,
+    ud. upsell_saas_arr,
+    ud.downsell_saas_arr,
+    SUM(churned_saas_arr) AS churned_saas_arr,
+    SUM(CASE WHEN cs.churn_reason = 'preventable' THEN churned_saas_arr
+          ELSE 0
+        END) AS preventable_churn_arr,
+    SUM(CASE WHEN cs.churn_reason <> 'preventable' THEN churned_saas_arr
+          ELSE 0
+        END) AS non_preventable_churn_arr
+ from grandparents gp
+ -- left join new_location_saas nls
+ --     on gp.salesforce_accountid = nls.salesforce_accountid
+ --     and gp.dt = nls.dt
+ left join upsell_downsell ud 
+    on gp.salesforce_accountid = ud.salesforce_accountid
+    and gp.dt = ud.dt
+left join churned_saas cs
+    on gp.salesforce_accountid = cs.salesforce_accountid
+    and gp.dt = cs.dt
+group by 1,2,3,4,5,6,7,8,9,10
+order by 1
+    );

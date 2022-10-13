@@ -1,0 +1,192 @@
+with period_defintions as (
+select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,30,firstdayofmonth) as period_end,
+    30 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+UNION ALL
+select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,60,firstdayofmonth) as period_end,
+    60 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+UNION ALL
+    select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,90,firstdayofmonth) as period_end,
+    90 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+UNION ALL
+select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,180,firstdayofmonth) as period_end,
+    180 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+    
+UNION ALL
+    select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,210,firstdayofmonth) as period_end,
+    270 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+UNION ALL
+select
+   distinct firstdayofmonth as month,
+    firstdayofmonth as period_start,
+    dateadd(day,365,firstdayofmonth) as period_end,
+    365 as daysinperiod,
+    'forward' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+    
+    
+UNION ALL
+    select
+   distinct firstdayofmonth as month,
+    dateadd(day,-30,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    30 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+union all
+        select
+   distinct firstdayofmonth as month,
+    dateadd(day,-60,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    60 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+union all
+        select
+   distinct firstdayofmonth as month,
+    dateadd(day,-90,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    90 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+union all
+        select
+   distinct firstdayofmonth as month,
+    dateadd(day,-180,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    180 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+union all
+select
+   distinct firstdayofmonth as month,
+    dateadd(day,-270,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    270 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+
+union all
+        select
+   distinct firstdayofmonth as month,
+    dateadd(day,-365,lastdayofmonth) as period_start,
+    lastdayofmonth as period_end,
+    365 as daysinperiod,
+    'lookback' as period_type
+from analytics_core.date_dim
+where dt <= current_date()
+group by 1,2,3,4
+    )
+
+, cross_join as (
+    select
+    pd.month
+    ,period_start
+    , daysinperiod
+    ,period_type
+    ,case when period_end > current_date then dateadd(day,-1,current_date) else period_end end as period_end
+    ,salesforce_accountid
+    from period_defintions  pd
+    cross join toast_joanna_karavolias_dev.care_tables.cohort_growth
+  --  where salesforce_accountid = '0013c00001nVetGAAS'
+    group by 1,2,3,4,5,6
+    order by 1,4
+)
+
+
+--, test as (
+select 
+     cj.*
+     , sum(case when cg.dt = cj.period_start then live_saas_arr end ) as period_start_saas
+     , sum(case when cg.dt = cj.period_end then live_saas_arr end) as period_end_saas
+    , sum(case when cg.dt = cj.period_start then location_count end) as period_start_location
+    , sum(case when cg.dt = cj.period_end then location_count end) as period_end_location
+    , sum(new_live_saas) as new_location_saas 
+    , sum(upsell_saas_arr) as upsell_saas
+    , sum(downsell_saas_arr) as downsell_saas
+    , sum(churned_saas_arr) as churn_saas
+    , sum(preventable_churn_arr) as preventable_churn_saas
+    , sum(non_preventable_churn_arr) as non_preventable_churn_saas
+from cross_join cj
+left join toast_joanna_karavolias_dev.care_tables.cohort_growth cg
+    on cj.salesforce_accountid = cg.salesforce_accountid
+    and cg.dt >= cj.period_start and cg.dt <= cj.period_end
+--where cg.salesforce_accountid = '0013c00001nVetGAAS'
+--where month = '2022-01-01'
+group by 1,2,3,4,5,6;
+)
+
+
+
+
+select 
+    month, period_start, period_end, daysinperiod, period_type
+    , round(sum(period_start_saas),2) as period_start_saas_1
+    , round(sum(period_end_saas),2) as period_end_saas
+    ,round(sum(new_location_saas),2) as new_location
+    ,round(sum(upsell_saas),2) as upsell
+    ,round(sum(downsell_saas),2) as downsell
+    ,round(sum(churn_saas),2) as churn
+   , round(div0(period_start_saas_1+new_location+upsell+downsell-churn,period_start_saas_1)*100,2) as cohort_growth
+from test
+where 1=1
+--and daysinperiod = 90 
+--and period_type ilike 'forward'
+--and salesforce_accountid = '0013c00001qs1QjAAI' 
+and period_start_location > 0
+group by 1,2,3,4,5
+order by period_type,daysinperiod;

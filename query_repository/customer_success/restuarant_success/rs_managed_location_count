@@ -1,0 +1,16 @@
+SELECT 
+    CASE 
+        WHEN (e.employee_name IS NULL OR e.employee_name = 'No RSM')
+            THEN 'Unmanaged'
+        ELSE e.employee_name
+    END AS rsm_name
+    ,c.parent_market_segment
+    ,COUNT(DISTINCT c.salesforce_accountid) 
+FROM analytics_core.customer c
+LEFT JOIN analytics_core.employee_daily_dim e 
+ON c.current_rsm_id = e.employee_row_id
+WHERE
+    c.pos_first_order_date IS NOT NULL
+    AND c.churn_date IS NULL
+GROUP BY 1,2
+;

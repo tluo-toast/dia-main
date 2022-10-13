@@ -1,0 +1,1 @@
+select * from cs_customer_care.support_tickets limit 100;
